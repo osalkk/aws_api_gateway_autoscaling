@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        form div {
+            margin: 10px;
+            padding: 5px;
+        }
+        form div span {
+            width: 70px;
+            display: inline-block;
+        }
+        form input[type="button"] {
+            margin-left: 15px;
+        }
+        form input[type="text"] {
+            width: 300px;
+        }
+        .asgBlock {
+            border: 1px solid #000000;
+            display: inline-block;
+            border-radius: 11px;
+            margin: 10px;
+            cursor: pointer;
+        }
+
+        .asgBlock .asgName {
+            text-align: center;
+            background-color: #D3D3D3;
+            border-radius: 11px 11px 0 0;
+            border-bottom: 1px solid #000000;
+            padding: 10px;
+        }
+
+        .asgBlock .asgDataLine {
+            border-bottom: 1px solid #000000;
+        }
+
+        .asgBlock .asgDataLine span {
+            padding: 5px 0 5px 15px;
+            display: inline-block;
+        }
+
+        .asgBlock .asgDataLine div {
+            width: 30px;
+            text-align: center;
+            float: right;
+            border-left: 1px solid #000000;
+            padding: 5px 0;
+        }
+
+        .asgBlock .asgDataLine:last-child {
+            border-bottom: 0;
+        }
+
+        table, th, td {
+            border: 1px solid black;
+            border-collapse: collapse;
+            text-align: center;
+            padding: 10px;
+        }
+
+        .loading {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            left: 0;
+            top: 0;
+            background: url("http://i.imgur.com/nWg9C7a.gif") rgba(0, 0, 0, 0.3) no-repeat 50%;
+        }
+    </style>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.11.3/jquery.min.js"></script>
+    <script>
+    ///////////////
+    // Templates //
+    ///////////////
+        var loginTemplate = function() {
+            return '<FORM NAME="asg">'+
+                    '<div><span>Key: </span><INPUT value="aws key" TYPE="text" NAME="key" size="20"></div>' +
+                    '<div><span>Secret: </span><INPUT value="aws secret key" TYPE="text" NAME="secret" size="20"></div>' +
+                    '<div><span>Region: </span><INPUT value="region" TYPE="text" NAME="region" size="20"></div>' +
+                    '<input type="button" value="Query" onClick="login();">' +
+                    '</FORM>';
+        }
+        var asgBlockTemplate = function (data) {
+            return '<div class="asgBlock" id="' + data["name"] + '">' +
+                    '<div class="asgName">' + data["name"] + '</div>' +
+                    '<div class="asgDataLine"><span>Desired Size:</span> <div>' + data["Desired Size"] + '</div></div>' +
+                    '<div class="asgDataLine"><span>Unhealthy Instance Count:</span> <div>' + data["Unhealthy Instance Count"] + '</div></div>' +
+                    '<div class="asgDataLine"><span>Healthy Instance Count:</span> <div>' + data["Healthy Instance Count"] + '</div></div>' +
+                    '<div class="asgDataLine"><span>Max Size:</span> <div>' + data["Max Size"] + '</div></div>' +
+                    '<div class="asgDataLine"><span>Instance Count:</span> <div>' + data["Instance Count"] + '</div></div>' +
+                    '<div class="asgDataLine"><span>Min Size:</span> <div>' + data["Min Size"] + '</div></div>' +
+                    '</div>';
+        };
+        var instanceLineTemplate = function (data) {
+            return '<tr>' +
+                    '<td class="instanceId">' + data['Id'] + '</td>' +
+                    '<td class="instanceZone">' + data['AZ'] + '</td>' +
+                    '<td class="instanceHealth">' + data['Health'] + '</td>' +
+                    '<td class="instanceCPUUsage">' + data['Cpu Usage'] + '</td>' +
+                    '</tr>';
+        };
+        var instanceTableTemplate = function () {
+            return '<table id="instanceTable"><tr><th>ID</th><th>Zone</th><th>Health</th><th>CPU Usage</th></tr></table>'
+        };
+
+    //////////////////
+    // Click Events //
+    //////////////////
+
+        var login = function() {
+            localStorage.setItem("key", document.forms[0].key.value);
+            localStorage.setItem("secret", document.forms[0].secret.value);
+            localStorage.setItem("region", document.forms[0].region.value);
+            window.location.hash = "step2";
+        };
+
+        var viewAsg = function(asgname) {
+            asgname = asgname || localStorage.getItem("asgName");
+            if (asgname){
+                localStorage.setItem("asgName", asgname);
+            }
+            window.location.hash = "step3";
+        };
+
+
+    /////////////////
+    // Controllers //
+    /////////////////
+
+        var dataReloader;
+
+        var listAsgs = function() {
+            var key = localStorage.getItem("key");
+            var secret = localStorage.getItem("secret");
+            var region = localStorage.getItem("region");
+            if (!key || !secret || !region) {
+                window.location.href = "";
+            }
+            var postData = {"key": key, "secret": secret, "region": region};
+            document.body.innerHTML += '<div class="loading"></div>';
+
+            clearInterval(dataReloader);
+
+            fetchAsgList(postData);
+            dataReloader = setInterval(function () {
+                fetchAsgList(postData);
+            }, 10000);
+        };
+
+        var asgDetailStep = function() {
+            var key = localStorage.getItem("key");
+            var secret = localStorage.getItem("secret");
+            var region = localStorage.getItem("region");
+            var asgname = localStorage.getItem("asgName");
+            if (!key || !secret || !region || !asgname) {
+                window.location.href = "";
+            }
+            var credentials = {"key": key, "secret": secret, "region": region, "asgname": asgname};
+            clearInterval(dataReloader);
+            document.body.innerHTML += '<div class="loading"></div>';
+            asgDataFetcher(credentials)
+            dataReloader = setInterval(function () {
+                asgDataFetcher(credentials);
+            }, 10000);
+        };
+
+        var renderLogin = function() {
+            clearInterval(dataReloader);
+            document.body.innerHTML = loginTemplate();
+        };
+
+    ////////////////////////
+    // Models and Listers //
+    ////////////////////////
+
+        var fetchAsgList = function (postData) {
+            $.ajax({
+                type: "POST",
+                data: JSON.stringify(postData),
+                url: "https://i4idwciojl.execute-api.eu-west-1.amazonaws.com/ASG/listasgs",
+                contentType: "application/json",
+                success: function (data) {
+                    document.body.innerHTML = '';
+                    data.forEach(function (item) {
+                        document.body.innerHTML += asgBlockTemplate(item);
+                    });
+                    var asgBlocks = document.getElementsByClassName("asgBlock");
+                    [].forEach.call(asgBlocks, function (block) {
+                        block.addEventListener("click", function () {
+                            viewAsg(this.id);
+                        });
+                    });
+                }
+            });
+        };
+
+        var asgDataFetcher = function (credentials) {
+            $.ajax({
+                type: "POST",
+                data: JSON.stringify(credentials),
+                url: "https://i4idwciojl.execute-api.eu-west-1.amazonaws.com/ASG/showasg",
+                contentType: "application/json",
+                success: function (data) {
+                    document.body.innerHTML = instanceTableTemplate();
+                    data.forEach(function (item) {
+                        document.getElementById("instanceTable").innerHTML += instanceLineTemplate(item);
+                    });
+                }
+            });
+        };
+
+    ////////////
+    // Router //
+    ////////////
+
+        window.addEventListener("hashchange", function(){
+            router();
+        });
+
+        var router = function() {
+            switch (window.location.hash){
+                case "#step2":
+                    listAsgs();
+                    break;
+                case "#step3":
+                    asgDetailStep();
+                    break;
+                default:
+                    renderLogin();
+                    break;
+            }
+        }
+
+    </script>
+</head>
+<body>
+<script>
+    router();
+</script>
+</body>
+</html>
